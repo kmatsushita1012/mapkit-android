@@ -56,6 +56,16 @@ data class MKCoordinateRegion(
         }
     }
 }
+
+data class MKRegionAdjustmentRequest(
+    val region: MKCoordinateRegion,
+    val widthPx: Int,
+    val heightPx: Int
+)
+
+interface MKRegionAdjuster {
+    suspend fun adjust(request: MKRegionAdjustmentRequest): MKCoordinateRegion
+}
 ```
 
 ### 2. 仕様上の契約
@@ -63,6 +73,8 @@ data class MKCoordinateRegion(
 - `lastOperation` は公開しない。
 - 利用者起因の初期/更新状態は常に system 扱いで内部へ渡る。
 - ユーザー操作由来はライブラリ内部でのみ `userInteractive` として扱う。
+- `MKRegionAdjuster` は指定 region を Apple 描画系に一度通した補正後 region を返す。
+- `MKRegionAdjuster` は最適表示領域の再計算をしない。
 
 ## 内部仕様
 
@@ -97,3 +109,8 @@ data class InternalCoordinateRegion(
 - 緯度経度: `1e-6`
 - span: `1e-5`
 - 近似一致時は再適用をスキップして反映ループを防ぐ。
+
+### 4. 補正 Region Resolver
+- 低レベル実装は `Activity` 上に一時的な非表示 `WebView` を生成して実行する。
+- MapKit JS の `map.region` は `region-change-end` を第一候補に、未発火時は `requestAnimationFrame` ベースの安定化待ちで取得する。
+- ViewModel は `Activity` を直接持たず、UI 層または DI 層で `ActivityBoundMKRegionAdjuster` を注入する。

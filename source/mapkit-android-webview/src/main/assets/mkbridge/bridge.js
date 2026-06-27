@@ -425,6 +425,132 @@
     state.map.region = new window.mapkit.CoordinateRegion(center, span);
   }
 
+  function snapshotMapRegion(region) {
+    if (!region || !region.center || !region.span) return null;
+    return {
+      centerLat: region.center.latitude,
+      centerLng: region.center.longitude,
+      latDelta: region.span.latitudeDelta,
+      lngDelta: region.span.longitudeDelta,
+    };
+  }
+
+  function regionsApproximatelyEqual(a, b) {
+    if (!a || !b) return false;
+    const coordEpsilon = 1e-6;
+    const spanEpsilon = 1e-5;
+    return (
+      Math.abs(a.centerLat - b.centerLat) <= coordEpsilon &&
+      Math.abs(a.centerLng - b.centerLng) <= coordEpsilon &&
+      Math.abs(a.latDelta - b.latDelta) <= spanEpsilon &&
+      Math.abs(a.lngDelta - b.lngDelta) <= spanEpsilon
+    );
+  }
+
+  function emitRegionResolution(payload) {
+    if (window.AndroidMKBridge && window.AndroidMKBridge.emitRegionResolution) {
+      window.AndroidMKBridge.emitRegionResolution(JSON.stringify(payload));
+    }
+  }
+
+  function waitForAdjustedRegionStability(timeoutMs) {
+    return new Promise((resolve, reject) => {
+      if (!state.map) {
+        reject(new Error("map is not ready"));
+        return;
+      }
+
+      const startedAt = Date.now();
+      const fallbackDelayMs = 48;
+      let sawRegionChangeEnd = false;
+      let lastRegion = null;
+      let stableFrames = 0;
+      let finished = false;
+      let frameHandle = 0;
+      let frameUsesTimeout = false;
+
+      const removeRegionChangeEndListener = function () {
+        try {
+          if (state.map && typeof state.map.removeEventListener === "function") {
+            state.map.removeEventListener("region-change-end", onRegionChangeEnd);
+          }
+        } catch (_) {}
+      };
+
+      const finishSuccess = function (region) {
+        if (finished) return;
+        finished = true;
+        if (frameHandle) {
+          if (frameUsesTimeout) clearTimeout(frameHandle);
+          else if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(frameHandle);
+        }
+        removeRegionChangeEndListener();
+        resolve(region);
+      };
+
+      const finishFailure = function (error) {
+        if (finished) return;
+        finished = true;
+        if (frameHandle) {
+          if (frameUsesTimeout) clearTimeout(frameHandle);
+          else if (typeof cancelAnimationFrame === "function") cancelAnimationFrame(frameHandle);
+        }
+        removeRegionChangeEndListener();
+        reject(error);
+      };
+
+      const onRegionChangeEnd = function () {
+        sawRegionChangeEnd = true;
+      };
+
+      try {
+        state.map.addEventListener("region-change-end", onRegionChangeEnd);
+      } catch (_) {}
+
+      const scheduleNext = function () {
+        if (typeof requestAnimationFrame === "function") {
+          frameUsesTimeout = false;
+          frameHandle = requestAnimationFrame(tick);
+        } else {
+          frameUsesTimeout = true;
+          frameHandle = setTimeout(tick, 16);
+        }
+      };
+
+      const tick = function () {
+        if (finished) return;
+        if (Date.now() - startedAt > timeoutMs) {
+          finishFailure(new Error("timed out waiting for adjusted region stability"));
+          return;
+        }
+
+        try {
+          const current = snapshotMapRegion(state.map.region);
+          if (current) {
+            if (lastRegion && regionsApproximatelyEqual(lastRegion, current)) {
+              stableFrames += 1;
+            } else {
+              stableFrames = 0;
+            }
+            lastRegion = current;
+
+            if (stableFrames >= 1 && (sawRegionChangeEnd || Date.now() - startedAt >= fallbackDelayMs)) {
+              finishSuccess(current);
+              return;
+            }
+          }
+        } catch (e) {
+          finishFailure(e);
+          return;
+        }
+
+        scheduleNext();
+      };
+
+      scheduleNext();
+    });
+  }
+
   function resolveImageSource(source) {
     if (!source || !source.kind) return null;
     if (source.kind === "MKImageSourceUrl" || source.kind === "url") return source.value || null;
@@ -877,6 +1003,63 @@
       } catch (e) {
         emitBridgeError(e && e.message ? e.message : e);
       }
+    },
+
+    resolveAdjustedRegion: function (region) {
+      if (!region) {
+        emitRegionResolution({
+          ok: false,
+          errorType: "bridgeFailure",
+          message: "region is required",
+        });
+        return;
+      }
+      if (!state.mapReady || !state.map) {
+        emitRegionResolution({
+          ok: false,
+          errorType: "bridgeFailure",
+          message: "map is not ready",
+        });
+        return;
+      }
+      try {
+        applyMapKitRegion(region);
+      } catch (e) {
+        emitRegionResolution({
+          ok: false,
+          errorType: "bridgeFailure",
+          message: e && e.message ? e.message : String(e),
+        });
+        return;
+      }
+
+      waitForAdjustedRegionStability(4000)
+        .then(function (adjustedRegion) {
+          state.region = adjustedRegion;
+          renderStatus();
+          emitRegionResolution({
+            ok: true,
+            region: adjustedRegion,
+          });
+        })
+        .catch(function (e) {
+          const message = e && e.message ? e.message : String(e);
+          if (message.indexOf("timed out") >= 0) {
+            emitRegionResolution({
+              ok: false,
+              errorType: "timeout",
+              phase: "adjustedRegion",
+              timeoutMs: 4000,
+              message: message,
+            });
+            return;
+          }
+          emitRegionResolution({
+            ok: false,
+            errorType: "bridgeFailure",
+            message: message,
+          });
+        });
     },
 
     selectAnnotationById: function (id, animated) {

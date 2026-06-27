@@ -1,6 +1,7 @@
 package com.studiomk.mapkit.model
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.fail
 import org.junit.Test
 
 class MKCoordinateRegionTest {
@@ -56,5 +57,33 @@ class MKCoordinateRegionTest {
 
         assertEquals(1.4, region.span.latitudeDelta, 1e-9)
         assertEquals(1.6, region.span.longitudeDelta, 1e-9)
+    }
+
+    @Test
+    fun regionAdjustmentRequest_requiresPositiveWidth() {
+        try {
+            MKRegionAdjustmentRequest(
+                region = MKCoordinateRegion.fromCenter(MKCoordinate(35.0, 139.0), 0.1, 0.1),
+                widthPx = 0,
+                heightPx = 420
+            )
+            fail("Expected IllegalArgumentException")
+        } catch (expected: IllegalArgumentException) {
+            assertEquals("widthPx must be > 0: 0", expected.message)
+        }
+    }
+
+    @Test
+    fun regionAdjustmentRequest_requiresPositiveHeight() {
+        try {
+            MKRegionAdjustmentRequest(
+                region = MKCoordinateRegion.fromCenter(MKCoordinate(35.0, 139.0), 0.1, 0.1),
+                widthPx = 594,
+                heightPx = -1
+            )
+            fail("Expected IllegalArgumentException")
+        } catch (expected: IllegalArgumentException) {
+            assertEquals("heightPx must be > 0: -1", expected.message)
+        }
     }
 }

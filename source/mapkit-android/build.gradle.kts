@@ -31,6 +31,7 @@ android {
 
 dependencies {
     api(project(":source:mapkit-android-compose"))
+    api(project(":source:mapkit-android-webview"))
 }
 
 publishing {

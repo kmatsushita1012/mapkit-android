@@ -148,6 +148,24 @@ fun SampleMap() {
 }
 ```
 
+## Adjusted region resolver
+
+If you need the same corrected region for Apple Snapshot rendering and Android-side projection, use `MKRegionAdjuster`.
+
+```kotlin
+val adjuster: MKRegionAdjuster = ActivityBoundMKRegionAdjuster { activity }
+
+val adjusted = adjuster.adjust(
+    MKRegionAdjustmentRequest(
+        region = rawRegion,
+        widthPx = 594,
+        heightPx = 420
+    )
+)
+```
+
+Recommended usage is to inject `MKRegionAdjuster` into your ViewModel while keeping `ActivityBoundMKRegionAdjuster` creation in the UI or DI layer.
+
 ## Modules
 
 - `source/mapkit-android`: aggregate artifact for easier adoption
