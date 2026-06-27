@@ -294,6 +294,35 @@ data class MKMapKitConfig(
     }
 }
 
+data class MKRegionAdjustmentRequest(
+    val region: MKCoordinateRegion,
+    val widthPx: Int,
+    val heightPx: Int
+) {
+    init {
+        require(widthPx > 0) { "widthPx must be > 0: $widthPx" }
+        require(heightPx > 0) { "heightPx must be > 0: $heightPx" }
+    }
+}
+
+interface MKRegionAdjuster {
+    suspend fun adjust(request: MKRegionAdjustmentRequest): MKCoordinateRegion
+}
+
+sealed class MKRegionResolutionException(message: String, cause: Throwable? = null) : Exception(message, cause) {
+    data object NotInitialized : MKRegionResolutionException("MKMapKit is not initialized")
+    data class InvalidSize(val widthPx: Int, val heightPx: Int) : MKRegionResolutionException(
+        "Requested size must be positive: ${widthPx}x$heightPx"
+    )
+    data class Timeout(val phase: String, val timeoutMs: Long) : MKRegionResolutionException(
+        "Timed out while waiting for $phase (${timeoutMs}ms)"
+    )
+    data class BridgeFailure(val detail: String, val source: Throwable? = null) : MKRegionResolutionException(
+        detail,
+        source
+    )
+}
+
 data class MKMapRenderState(
     val region: MKCoordinateRegion,
     val annotations: List<MKAnnotation> = emptyList(),

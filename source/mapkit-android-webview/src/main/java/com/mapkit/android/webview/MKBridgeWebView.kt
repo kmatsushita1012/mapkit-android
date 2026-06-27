@@ -24,6 +24,7 @@ import com.studiomk.mapkit.model.MKMapErrorCause
 import com.studiomk.mapkit.model.MKMapCommand
 import com.studiomk.mapkit.model.MKMapEvent
 import com.studiomk.mapkit.model.MKMapRenderState
+import com.studiomk.mapkit.model.MKRegionResolutionException
 import com.studiomk.mapkit.model.MKAnnotationStyle
 import com.studiomk.mapkit.model.MKImageSource
 import com.studiomk.mapkit.model.MKPoiFilter
@@ -57,6 +58,7 @@ class MKBridgeWebView @JvmOverloads constructor(
     private var lastAppliedStatePayload: String? = null
     private var pendingState: MKMapRenderState? = null
     private val pendingCommands: MutableList<MKMapCommand> = mutableListOf()
+    private var onResolvedRegion: ((Result<MKCoordinateRegion>) -> Unit)? = null
 
     private val androidBridge = object {
         @JavascriptInterface
@@ -69,6 +71,31 @@ class MKBridgeWebView @JvmOverloads constructor(
                     onEvent?.invoke(
                         MKMapEvent.MapError(
                             MKMapErrorCause.BridgeFailure("Failed to parse JS event: ${t.message}")
+                        )
+                    )
+                }
+            }
+        }
+
+        @JavascriptInterface
+        fun emitRegionResolution(payload: String) {
+            try {
+                val result = parseRegionResolution(JSONObject(payload))
+                post {
+                    val callback = onResolvedRegion ?: return@post
+                    onResolvedRegion = null
+                    callback(result)
+                }
+            } catch (t: Throwable) {
+                post {
+                    val callback = onResolvedRegion ?: return@post
+                    onResolvedRegion = null
+                    callback(
+                        Result.failure(
+                            MKRegionResolutionException.BridgeFailure(
+                                detail = "Failed to parse region resolution: ${t.message}",
+                                source = t
+                            )
                         )
                     )
                 }
@@ -172,6 +199,7 @@ class MKBridgeWebView @JvmOverloads constructor(
         isJsInitSent = false
         lastAppliedRegionPayload = null
         lastAppliedStatePayload = null
+        onResolvedRegion = null
         loadUrl(entryUrl(config))
     }
 
@@ -207,6 +235,30 @@ class MKBridgeWebView @JvmOverloads constructor(
     fun deselectAnnotation(animated: Boolean = false) {
         evaluateJavascriptSafe(
             "window.MKBridge && window.MKBridge.deselectAnnotation && window.MKBridge.deselectAnnotation($animated);"
+        )
+    }
+
+    fun resolveAdjustedRegion(region: MKCoordinateRegion, listener: (Result<MKCoordinateRegion>) -> Unit) {
+        if (!isPageReady || !isJsInitSent) {
+            listener(
+                Result.failure(
+                    MKRegionResolutionException.BridgeFailure("MKBridgeWebView is not ready for region resolution")
+                )
+            )
+            return
+        }
+        if (onResolvedRegion != null) {
+            listener(
+                Result.failure(
+                    MKRegionResolutionException.BridgeFailure("A region resolution is already in progress")
+                )
+            )
+            return
+        }
+        onResolvedRegion = listener
+        val payload = serializeRegion(region)
+        evaluateJavascriptSafe(
+            "window.MKBridge && window.MKBridge.resolveAdjustedRegion && window.MKBridge.resolveAdjustedRegion($payload);"
         )
     }
 
@@ -478,6 +530,36 @@ class MKBridgeWebView @JvmOverloads constructor(
                 MKMapErrorCause.BridgeFailure("Unknown event type: ${json.optString("type")}")
             )
         }
+    }
+
+    private fun parseRegionResolution(json: JSONObject): Result<MKCoordinateRegion> {
+        val ok = json.optBoolean("ok", false)
+        if (!ok) {
+            val type = json.optString("errorType", "bridgeFailure")
+            val message = json.optString("message", "region resolution failed")
+            return Result.failure(
+                when (type) {
+                    "timeout" -> MKRegionResolutionException.Timeout(
+                        phase = json.optString("phase", "unknown"),
+                        timeoutMs = json.optLong("timeoutMs", 0L)
+                    )
+                    "invalidSize" -> MKRegionResolutionException.InvalidSize(
+                        widthPx = json.optInt("widthPx", 0),
+                        heightPx = json.optInt("heightPx", 0)
+                    )
+                    else -> MKRegionResolutionException.BridgeFailure(message)
+                }
+            )
+        }
+
+        val region = json.getJSONObject("region")
+        val internal = InternalMapState(
+            centerLat = region.getDouble("centerLat"),
+            centerLng = region.getDouble("centerLng"),
+            latDelta = region.getDouble("latDelta"),
+            lngDelta = region.getDouble("lngDelta")
+        )
+        return Result.success(MKBridgeMapper.toRegion(internal))
     }
 
     private fun serializeAnnotationStyle(style: MKAnnotationStyle): JSONObject {

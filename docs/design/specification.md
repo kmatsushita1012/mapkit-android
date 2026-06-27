@@ -106,6 +106,7 @@
 - `MapCommand.SetRegion(region, animated)`
 - `MapCommand.FitBounds(points, edgePadding, animated)`
 - `MapCommand.SetCenter(center, zoomHint, animated)` (簡易操作)
+- `MKRegionAdjuster.adjust(request)` で、指定 region を Apple 描画系へ通した補正後 region を取得できる。
 
 #### 3.1.3 公開イベント契約
 - パン/ズーム中: `RegionDidChange(isSettled=false)`
@@ -128,6 +129,12 @@
 - `region-change-start` で `isInteracting = true`
 - `region-change-end` で `isInteracting = false`, `isSettled = true`
 - 途中イベントは throttling(例: 100ms)で Kotlin へ通知。
+
+#### 3.2.4 補正 Region Resolver
+- `MKRegionAdjuster` は最適表示領域の再計算ではなく、指定済み `region` を MapKit JS が最終的にどう解釈したかを返す。
+- 実装は `Activity` 上の一時非表示 `WebView` で行い、`widthPx x heightPx` を実レイアウトサイズとして `mapkit.Map` を生成する。
+- 補正後 region の取得は `region-change-end` を第一候補とし、初期適用時の未発火に備えて `requestAnimationFrame` による連続フレーム安定化を併用する。
+- ViewModel は `Activity` を直接保持せず、`MKRegionAdjuster` 抽象に依存する。
 
 ---
 
