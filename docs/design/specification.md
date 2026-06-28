@@ -162,6 +162,7 @@
 - Annotation:
 - `Default(tint, glyphText?, glyphImageSource?)` (MKMarkerAnnotationView 相当)
 - `CustomImage(source, width, height, anchor)` (MKAnnotationView 相当)
+- `Dom(html, anchorX, anchorY, allowSelection)` (MapKit JS `Annotation` + `HTMLElement` factory)
 - Overlay:
 - `strokeColor`, `strokeWidth`, `fillColor`, `lineDashPattern`
 - 注記: Polygon/Circle の `fillColor` alpha は MapKit JS レンダラ依存で、
@@ -179,6 +180,7 @@
 - update 判定は `hash(style + geometry + visibility)` で実施。
 - `isSelected` は差分キーに含めない。選択状態は select/deselect event 起点で同期する。
 - map 再生成は禁止。差分命令のみ送信。
+- `Dom` annotation の HTML 本文変更のみは `innerHTML` 差し替えで反映し、annotation 再生成を避ける。
 
 #### 4.2.2 選択制御方針
 - Kotlin 側の明示制御は `MKMapState.selectAnnotation/deselectAnnotation` を使う。
@@ -191,6 +193,7 @@
 - default renderer
 - custom renderer registry (`key` 解決)
 - 未登録 `key` はフォールバックで `DefaultMarker`。
+- `Dom` は `mapkit.Annotation` の factory から `HTMLElement` を返して描画する。
 
 #### 4.2.3 タップヒット処理
 - JS 側でオブジェクト `id` を保持し、イベント時に Kotlin へ返却。

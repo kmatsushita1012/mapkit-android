@@ -37,6 +37,12 @@ sealed interface MKAnnotationStyle {
         val anchorX: Double = 0.5,
         val anchorY: Double = 1.0
     ) : MKAnnotationStyle
+    data class Dom(
+        val html: String,
+        val anchorX: Double = 0.5,
+        val anchorY: Double = 1.0,
+        val allowSelection: Boolean = true
+    ) : MKAnnotationStyle
 }
 ```
 
@@ -138,6 +144,14 @@ data class MKUserLocationOptions(
 - `Base64Png`: `data:image/png;base64,...` へ変換して描画。
 - `ResourceName`: Android リソースを base64 化して JS へ渡し描画。
 - 画像は内部キャッシュ(key: source + size)し、同一画像は再デコードしない。
+
+### 3.1 DOM annotation 描画方式
+- `MKAnnotationStyle.Dom` は JS 側 `mapkit.Annotation` + `HTMLElement` factory で描画する。
+- payload は `html / anchorX / anchorY / allowSelection` を持つ。
+- `html` は trusted input 前提でそのまま使うが、`<script>` と inline event handler を検出した場合は描画せず bridge error を返す。
+- `html` のみ変更時は既存 DOM の `innerHTML` を差し替え、annotation 自体は再生成しない。
+- click は DOM 側で拾って `AnnotationTapped` を emit する。
+- `allowSelection=true` の場合のみ `selectedAnnotation` 同期を試み、`AnnotationSelected` / `AnnotationDeselected` を既存経路で通知する。
 
 ### 4. ヒットテスト規約
 - JS 側で描画オブジェクトと `id` を 1:1 保持。

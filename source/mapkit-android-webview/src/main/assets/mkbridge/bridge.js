@@ -29,10 +29,12 @@
     userLocationShowsAccuracyRing: true,
     userLocationWatchId: null,
     annotationsById: {},
+    annotationElementsById: {},
     overlaysById: {},
     annotationHashesById: {},
     overlayHashesById: {},
     lastSelectedAnnotationId: null,
+    pendingDomTapSelectionId: null,
     longPressHandlersInstalled: false,
     suppressNextRegionWillChange: true,
   };
@@ -112,6 +114,47 @@
     const normalized = Object.assign({}, item);
     delete normalized.isSelected;
     return stableHash(normalized);
+  }
+
+  function domAnnotationStructureHash(item) {
+    const style = item && item.style ? item.style : {};
+    return stableHash({
+      id: item && item.id,
+      lat: item && item.lat,
+      lng: item && item.lng,
+      isVisible: item && item.isVisible,
+      isDraggable: item && item.isDraggable,
+      kind: style.kind,
+      anchorX: style.anchorX,
+      anchorY: style.anchorY,
+      allowSelection: style.allowSelection,
+    });
+  }
+
+  function domAnnotationContentHash(item) {
+    const style = item && item.style ? item.style : {};
+    return stableHash({
+      html: style.html,
+    });
+  }
+
+  function sanitizeDomAnnotationHtml(html) {
+    const value = String(html || "");
+    if (/<\s*script\b/i.test(value)) return null;
+    if (/\son[a-z]+\s*=/i.test(value)) return null;
+    return value;
+  }
+
+  function updateDomAnnotationContent(id, html) {
+    const sanitized = sanitizeDomAnnotationHtml(html);
+    if (sanitized == null) {
+      emitBridgeError("Rejected unsafe HTML for annotation id=" + String(id));
+      return false;
+    }
+    const element = state.annotationElementsById[String(id)];
+    if (!element) return false;
+    element.innerHTML = sanitized;
+    return true;
   }
 
   function mapTypeFor(style) {
@@ -362,7 +405,11 @@
         if (event && event.annotation && event.annotation.data && event.annotation.data.id) {
           const id = String(event.annotation.data.id);
           state.lastSelectedAnnotationId = id;
-          emit({ type: "annotationTapped", id: id });
+          if (state.pendingDomTapSelectionId === id) {
+            state.pendingDomTapSelectionId = null;
+          } else {
+            emit({ type: "annotationTapped", id: id });
+          }
           if (typeof requestAnimationFrame === "function") {
             requestAnimationFrame(function () {
               debugLog("emit annotationSelected id=" + id);
@@ -596,7 +643,40 @@
     const style = item.style || { kind: "MKAnnotationStyleMarker" };
     let annotation = null;
     try {
-      if ((style.kind === "MKAnnotationStyleImage" || style.kind === "customImage") && window.mapkit.ImageAnnotation) {
+      if (style.kind === "MKAnnotationStyleDom" && window.mapkit.Annotation) {
+        const sanitizedHtml = sanitizeDomAnnotationHtml(style.html);
+        if (sanitizedHtml == null) {
+          emitBridgeError("Rejected unsafe HTML for annotation id=" + String(item.id));
+          return null;
+        }
+        annotation = new window.mapkit.Annotation(
+          coord,
+          function () {
+            const wrapper = document.createElement("div");
+            wrapper.className = "mapkit-android-dom-annotation";
+            wrapper.dataset.annotationId = String(item.id);
+            wrapper.innerHTML = sanitizedHtml;
+            wrapper.addEventListener("click", function (event) {
+              event.stopPropagation();
+              emit({ type: "annotationTapped", id: String(item.id) });
+              if (style.allowSelection !== false && state.map && "selectedAnnotation" in state.map) {
+                state.pendingDomTapSelectionId = String(item.id);
+                try {
+                  state.map.selectedAnnotation = annotation;
+                } catch (_) {
+                  state.pendingDomTapSelectionId = null;
+                }
+              }
+            });
+            state.annotationElementsById[String(item.id)] = wrapper;
+            return wrapper;
+          },
+          {
+            data: { id: item.id },
+            calloutEnabled: false,
+          }
+        );
+      } else if ((style.kind === "MKAnnotationStyleImage" || style.kind === "customImage") && window.mapkit.ImageAnnotation) {
         const imageUrl = resolveImageSource(style.source);
         annotation = new window.mapkit.ImageAnnotation(coord, {
           title: item.title || undefined,
@@ -673,6 +753,7 @@
           state.map.removeAnnotation(state.annotationsById[id]);
         } catch (_) {}
         delete state.annotationsById[id];
+        delete state.annotationElementsById[id];
         delete state.annotationHashesById[id];
       }
     });
@@ -680,15 +761,33 @@
     Object.keys(nextMap).forEach((id) => {
       const item = nextMap[id];
       if (item && item.isVisible === false) return;
-      const nextHash = stableAnnotationHash(item);
+      const style = item && item.style ? item.style : {};
+      const isDom = style.kind === "MKAnnotationStyleDom";
+      const nextHash = isDom
+        ? {
+            structure: domAnnotationStructureHash(item),
+            content: domAnnotationContentHash(item),
+          }
+        : stableAnnotationHash(item);
       const prevHash = state.annotationHashesById[id];
-      if (prevHash === nextHash && state.annotationsById[id]) return;
+      if (isDom && prevHash && state.annotationsById[id]) {
+        if (prevHash.structure === nextHash.structure) {
+          if (prevHash.content === nextHash.content) return;
+          if (updateDomAnnotationContent(id, style.html)) {
+            state.annotationHashesById[id] = nextHash;
+            return;
+          }
+        }
+      } else if (prevHash === nextHash && state.annotationsById[id]) {
+        return;
+      }
 
       if (state.annotationsById[id]) {
         try {
           state.map.removeAnnotation(state.annotationsById[id]);
         } catch (_) {}
       }
+      delete state.annotationElementsById[id];
       const marker = buildAnnotation(item);
       if (!marker) return;
       state.map.addAnnotation(marker);
