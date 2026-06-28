@@ -25,12 +25,11 @@ import com.studiomk.mapkit.model.MKMapCommand
 import com.studiomk.mapkit.model.MKMapEvent
 import com.studiomk.mapkit.model.MKMapRenderState
 import com.studiomk.mapkit.model.MKRegionResolutionException
-import com.studiomk.mapkit.model.MKAnnotationStyle
-import com.studiomk.mapkit.model.MKImageSource
 import com.studiomk.mapkit.model.MKPoiFilter
 import com.studiomk.mapkit.model.MKPolygonOverlay
 import com.studiomk.mapkit.model.MKPolylineOverlay
 import com.studiomk.mapkit.model.MKWebAssetSource
+import com.studiomk.mapkit.webview.internal.AnnotationStyleJsonSerializer
 import com.studiomk.mapkit.webview.internal.InternalMapState
 import com.studiomk.mapkit.webview.internal.MKBridgeMapper
 import androidx.core.content.ContextCompat
@@ -366,7 +365,7 @@ class MKBridgeWebView @JvmOverloads constructor(
                         .put("subtitle", annotation.subtitle)
                         .put("isVisible", annotation.isVisible)
                         .put("isDraggable", annotation.isDraggable)
-                        .put("style", serializeAnnotationStyle(annotation.style))
+                        .put("style", JSONObject(AnnotationStyleJsonSerializer.serialize(annotation.style)))
                 )
             }
         }
@@ -562,40 +561,4 @@ class MKBridgeWebView @JvmOverloads constructor(
         return Result.success(MKBridgeMapper.toRegion(internal))
     }
 
-    private fun serializeAnnotationStyle(style: MKAnnotationStyle): JSONObject {
-        return when (style) {
-            is MKAnnotationStyle.Marker -> JSONObject()
-                .put("kind", "MKAnnotationStyleMarker")
-                .put("tintHex", style.tintHex)
-                .put("glyphText", style.glyphText)
-                .put(
-                    "glyphImageSource",
-                    style.glyphImageSource?.let { serializeImageSource(it) }
-                )
-
-            is MKAnnotationStyle.Image -> JSONObject()
-                .put("kind", "MKAnnotationStyleImage")
-                .put("source", serializeImageSource(style.source))
-                .put("widthDp", style.widthDp)
-                .put("heightDp", style.heightDp)
-                .put("anchorX", style.anchorX)
-                .put("anchorY", style.anchorY)
-        }
-    }
-
-    private fun serializeImageSource(source: MKImageSource): JSONObject {
-        return when (source) {
-            is MKImageSource.Url -> JSONObject()
-                .put("kind", "MKImageSourceUrl")
-                .put("value", source.value)
-
-            is MKImageSource.Base64Png -> JSONObject()
-                .put("kind", "MKImageSourceBase64Png")
-                .put("value", source.value)
-
-            is MKImageSource.ResourceName -> JSONObject()
-                .put("kind", "MKImageSourceResourceName")
-                .put("value", source.value)
-        }
-    }
 }

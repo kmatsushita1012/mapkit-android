@@ -75,6 +75,13 @@ sealed interface MKAnnotationStyle {
         val anchorX: Double = 0.5,
         val anchorY: Double = 1.0
     ) : MKAnnotationStyle
+
+    data class Dom(
+        val html: String,
+        val anchorX: Double = 0.5,
+        val anchorY: Double = 1.0,
+        val allowSelection: Boolean = true
+    ) : MKAnnotationStyle
 }
 
 data class MKAnnotation(
