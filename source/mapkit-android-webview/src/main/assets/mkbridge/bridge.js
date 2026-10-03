@@ -960,6 +960,7 @@
           isZoomEnabled: true,
           isScrollEnabled: true,
         });
+        console.info("[MKBridge] map instance created");
 
         state.map.addEventListener("error", function (e) {
           const msg = e && e.message ? e.message : "map error";

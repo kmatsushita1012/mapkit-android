@@ -2,6 +2,7 @@ package com.studiomk.mapkit.api
 
 import android.view.MotionEvent
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -241,6 +242,7 @@ fun MKMapView(
     controller: MKMapController,
     options: MKMapOptions = MKMapOptions(),
     modifier: Modifier = Modifier,
+    session: MKMapSession? = null,
     onRegionWillChange: ((MKCoordinateRegion) -> Unit)? = null,
     onRegionDidChange: ((MKCoordinateRegion) -> Unit)? = null,
     onMapTapped: ((MKCoordinate) -> Unit)? = null,
@@ -250,6 +252,10 @@ fun MKMapView(
     onUserLocationUpdated: ((MKCoordinate) -> Unit)? = null,
     content: MKMapContentScope.() -> Unit
 ) {
+    val sessionOwner = remember { Any() }
+    DisposableEffect(session, sessionOwner) {
+        onDispose { session?.release(sessionOwner) }
+    }
     val collected = MKMapContentCollector().collect(content)
     val renderState = MKMapRenderState(
         region = region,
@@ -272,8 +278,13 @@ fun MKMapView(
         modifier = modifier,
         factory = { context ->
             val config = MKMapKit.currentConfig()
-            MKBridgeWebView(context, mapKitConfig = config).also { webView ->
+            (session?.acquire(sessionOwner) ?: MKBridgeWebView(context, mapKitConfig = config)).also { webView ->
                 webView.installParentScrollInterceptionGuard()
+            }
+        },
+        update = { webView ->
+            if (session == null || session.owns(sessionOwner)) {
+                webView.applyMapKitConfig(MKMapKit.currentConfig())
                 webView.setEventListener { event ->
                     when (event) {
                         is MKMapEvent.MapLoaded -> latestOnMapLoaded.value?.invoke()
@@ -305,7 +316,11 @@ fun MKMapView(
                         else -> Unit
                     }
                 }
-                controller.bindCommandDispatcher { command -> webView.applyCommand(command) }
+                if (session != null) {
+                    session.bind(sessionOwner, controller)
+                } else {
+                    controller.bindCommandDispatcher { command -> webView.applyCommand(command) }
+                }
                 val token = MKMapKit.currentTokenOrNull()
                 if (token != null) {
                     webView.ensureInitialized(token)
@@ -313,48 +328,6 @@ fun MKMapView(
                 } else {
                     latestOnMapError.value?.invoke(MKMapErrorCause.TokenUnavailable)
                 }
-            }
-        },
-        update = { webView ->
-            webView.applyMapKitConfig(MKMapKit.currentConfig())
-            webView.setEventListener { event ->
-                when (event) {
-                    is MKMapEvent.MapLoaded -> latestOnMapLoaded.value?.invoke()
-                    is MKMapEvent.MapError -> latestOnMapError.value?.invoke(event.cause)
-                    is MKMapEvent.RegionWillChange -> latestOnRegionWillChange.value?.invoke(event.region)
-                    is MKMapEvent.RegionDidChange -> latestOnRegionDidChange.value?.invoke(event.region)
-                    is MKMapEvent.MapTapped -> latestOnMapTapped.value?.invoke(event.coordinate)
-                    is MKMapEvent.LongPress -> latestOnLongPress.value?.invoke(event.coordinate)
-                    is MKMapEvent.UserLocationUpdated -> latestOnUserLocationUpdated.value?.invoke(event.coordinate)
-
-                    is MKMapEvent.AnnotationSelected -> {
-                        latestAnnotationCallbacks.value[event.id]?.onSelected?.invoke()
-                    }
-                    is MKMapEvent.AnnotationDeselected -> {
-                        latestAnnotationCallbacks.value[event.id]?.onDeselected?.invoke()
-                    }
-                    is MKMapEvent.AnnotationDragStart -> {
-                        latestAnnotationCallbacks.value[event.id]?.onDragStart?.invoke()
-                    }
-                    is MKMapEvent.AnnotationDragging -> {
-                        latestAnnotationCallbacks.value[event.id]?.onDrag?.invoke(event.coordinate)
-                    }
-                    is MKMapEvent.AnnotationDragEnd -> {
-                        latestAnnotationCallbacks.value[event.id]?.onDragEnd?.invoke(event.coordinate)
-                    }
-                    is MKMapEvent.OverlayTapped -> {
-                        latestOverlayCallbacks.value[event.id]?.onTap?.invoke()
-                    }
-                    else -> Unit
-                }
-            }
-            controller.bindCommandDispatcher { command -> webView.applyCommand(command) }
-            val token = MKMapKit.currentTokenOrNull()
-            if (token != null) {
-                webView.ensureInitialized(token)
-                webView.applyState(renderState)
-            } else {
-                latestOnMapError.value?.invoke(MKMapErrorCause.TokenUnavailable)
             }
         }
     )

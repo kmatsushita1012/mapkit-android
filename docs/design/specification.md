@@ -1,5 +1,8 @@
 # Android向け MapKit JS 連携基盤 具体仕様書
 
+Activity 間ではなく同一 Activity 内の Composable 切替で地図を保持する仕様は
+[Activity-owned MapKit session](specs/06_activity_map_session.md) を参照。
+
 ## 0. 前提
 
 本仕様書は [main.md](/Users/matsushitakazuya/private/mapkit-android/docs/design/main.md) を具体化したものであり、各章を必ず **外部仕様(interface) -> 内部仕様** の順で記述する。
